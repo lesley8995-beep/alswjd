@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>X6+ 시즌패스 3D 지도</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;font-family:"Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;background:#dfe9f5;color:#14233a}
+  #app{display:flex;height:100%}
+  #side{width:340px;max-width:44vw;background:#fff;border-right:1px solid #dbe4ef;padding:18px;overflow:auto;display:flex;flex-direction:column;gap:14px}
+  h1{margin:0;font-size:19px;color:#1b5fc4}
+  .sub{font-size:12.5px;color:#5a6b82;margin-top:2px}
+  .list{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .list button{border:1px solid #cfdbea;background:#f5f8fc;border-radius:8px;padding:8px 6px;font:inherit;font-size:13.5px;font-weight:700;cursor:pointer;color:#14233a}
+  .list button.on{background:#1b5fc4;color:#fff;border-color:#1b5fc4}
+  #info{background:#e6f0fd;border-radius:12px;padding:14px;font-size:14px;min-height:110px}
+  #info b{display:block;font-size:16px;margin-bottom:4px;color:#1b5fc4}
+  .new{display:inline-block;background:#e11d48;color:#fff;font-size:11px;font-weight:700;border-radius:6px;padding:0 6px;margin-left:6px;vertical-align:middle}
+  .ghost{border:1px solid #cfdbea;background:#fff;border-radius:8px;padding:8px 10px;font:inherit;font-size:13.5px;cursor:pointer}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:6px 6px;border-bottom:1px solid #e3eaf3;text-align:left}
+  th{color:#5a6b82;font-weight:600}
+  td.n{text-align:right;white-space:nowrap}
+  .end{color:#8a97a8}
+  .small{font-size:12px;color:#5a6b82;line-height:1.5}
+  #view{flex:1;position:relative;min-width:0}
+  canvas{display:block}
+  #hint{position:absolute;left:12px;bottom:10px;font-size:12px;color:#5a6b82;background:rgba(255,255,255,.85);padding:4px 8px;border-radius:6px}
+  #err{display:none;padding:24px;font-size:14px}
+  @media(max-width:700px){#app{flex-direction:column-reverse}#side{width:100%;max-width:none;height:50%;border-right:0;border-top:1px solid #dbe4ef}}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <div>
+      <h1>⛷️ X6+ 시즌패스 3D 지도</h1>
+      <div class="sub">26/27 · 스키장 6곳을 한 장으로 · NOL 단독 판매</div>
+    </div>
+    <div class="list" id="list"></div>
+    <div id="info"><b>봉우리를 눌러 보세요</b>드래그해 회전하고 휠·핀치로 확대할 수 있습니다.</div>
+    <div class="row">
+      <button class="ghost" id="rot">자동 회전 ON</button>
+      <button class="ghost" id="links">연결선 ON</button>
+      <button class="ghost" id="reset">시점 초기화</button>
+    </div>
+    <div>
+      <table>
+        <tr><th>차수</th><th>기간</th><th>성인/청소년</th></tr>
+        <tr class="end"><td>1차</td><td>9/9~9/27</td><td class="n">599,000 / 399,000</td></tr>
+        <tr class="end"><td>2차</td><td>10/12~11/19</td><td class="n">649,000 / 449,000</td></tr>
+        <tr><td>3차</td><td>미공개</td><td class="n">판매예정</td></tr>
+      </table>
+      <div class="small" style="margin-top:6px">2차 판매는 11/19에 종료됐고 3차는 NOL에 ‘판매예정’으로만 표시됩니다(일정·가격 미확인). 구매 전 NOL 상품 페이지에서 확인하세요.</div>
+    </div>
+    <div class="small">
+      ※ 지도는 실제 위치를 단순화한 개념도이며 거리·고도·슬로프 규모와 무관합니다. 평창의 모나용평과 알펜시아는 가까워 간격을 벌려 표시했습니다.
+    </div>
+  </aside>
+  <div id="view">
+    <div id="err">3D 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인한 뒤 다시 열어 주세요.</div>
+    <div id="hint">드래그: 회전 · 우클릭/두 손가락: 이동 · 휠: 확대</div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function(){
+  if (typeof THREE === 'undefined' || !THREE.OrbitControls) {
+    document.getElementById('err').style.display = 'block';
+    return;
+  }
+
+  var RESORTS = [
+    {n:'모나용평', loc:'강원 평창', x:14.4, z:-2.2, d:'X6+ 이용 가능.'},
+    {n:'알펜시아', loc:'강원 평창', x:12.2, z:-4.0, d:'X6+ 이용 가능. 이번 시즌 신규 합류(지난 시즌 X5+ → X6+).', isNew:true},
+    {n:'하이원리조트', loc:'강원 정선', x:16.4, z:6.0, d:'X6+ 이용 가능. 개장 11/27 예정(11/18 기준 안내, 기상에 따라 변동).'},
+    {n:'웰리힐리파크', loc:'강원 횡성', x:2.0, z:0.0, d:'X6+ 이용 가능.'},
+    {n:'엘리시안강촌', loc:'강원 춘천', x:-5.8, z:-6.4, d:'X6+ 이용 가능.'},
+    {n:'지산리조트', loc:'경기 이천', x:-11.0, z:5.8, d:'X6+ 이용 가능.'}
+  ];
+
+  var view = document.getElementById('view');
+  var scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xdfe9f5);
+  scene.fog = new THREE.Fog(0xdfe9f5, 45, 95);
+
+  var camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
+  var HOME = new THREE.Vector3(8, 20, 26);
+  var TARGET = new THREE.Vector3(2, 1, 0);
+  camera.position.copy(HOME);
+
+  var renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  view.appendChild(renderer.domElement);
+
+  var controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.target.copy(TARGET);
+  controls.enableDamping = true;
+  controls.maxPolarAngle = Math.PI * 0.48;
+  controls.minDistance = 10;
+  controls.maxDistance = 60;
+  controls.autoRotate = true;
+  controls.autoRotateSpeed = 0.6;
+
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xaebfd6, 0.9));
+  var sun = new THREE.DirectionalLight(0xffffff, 0.7);
+  sun.position.set(10, 25, 12);
+  scene.add(sun);
+
+  // ground (snowy plate)
+  var ground = new THREE.Mesh(new THREE.CircleGeometry(34, 64),
+    new THREE.MeshLambertMaterial({color:0xf2f7fc}));
+  ground.rotation.x = -Math.PI/2;
+  scene.add(ground);
+  var grid = new THREE.GridHelper(60, 30, 0xc7d6e8, 0xdbe5f1);
+  grid.position.y = 0.02;
+  scene.add(grid);
+
+  function label(text, scale, color) {
+    var c = document.createElement('canvas');
+    c.width = 512; c.height = 128;
+    var g = c.getContext('2d');
+    g.font = '700 54px "Malgun Gothic","Noto Sans KR",sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.lineWidth = 10; g.strokeStyle = 'rgba(255,255,255,.95)';
+    g.strokeText(text, 256, 64);
+    g.fillStyle = color || '#14233a';
+    g.fillText(text, 256, 64);
+    var t = new THREE.CanvasTexture(c);
+    var s = new THREE.Sprite(new THREE.SpriteMaterial({map:t, transparent:true, depthTest:false}));
+    s.scale.set(scale, scale/4, 1);
+    s.renderOrder = 10;
+    return s;
+  }
+
+  var peaks = [], pickables = [], selected = -1;
+  RESORTS.forEach(function(r, i){
+    var g = new THREE.Group();
+    g.position.set(r.x, 0, r.z);
+    var body = new THREE.Mesh(new THREE.ConeGeometry(2.2, 3.6, 28),
+      new THREE.MeshLambertMaterial({color: r.isNew ? 0xe0556f : 0x2f6fcf}));
+    body.position.y = 1.8;
+    body.userData.idx = i;
+    var cap = new THREE.Mesh(new THREE.ConeGeometry(0.85, 1.2, 28),
+      new THREE.MeshLambertMaterial({color:0xffffff}));
+    cap.position.y = 3.05;
+    cap.userData.idx = i;
+    g.add(body); g.add(cap);
+    pickables.push(body, cap);
+
+    var ring = new THREE.Mesh(new THREE.RingGeometry(2.5, 2.8, 48),
+      new THREE.MeshBasicMaterial({color:0xf5a524, side:THREE.DoubleSide, transparent:true, opacity:0}));
+    ring.rotation.x = -Math.PI/2;
+    ring.position.y = 0.05;
+    g.add(ring);
+
+    var lb = label(r.n, 4.6);
+    lb.position.set(0, 4.9, 0);
+    g.add(lb);
+    scene.add(g);
+    peaks.push({g:g, body:body, ring:ring, y:0});
+  });
+
+  // hub badge + links
+  var cx = 0, cz = 0;
+  RESORTS.forEach(function(r){ cx += r.x; cz += r.z; });
+  cx /= RESORTS.length; cz /= RESORTS.length;
+  var hubPos = new THREE.Vector3(cx, 7.5, cz);
+  var hub = label('X6+', 3.6, '#c2410c');
+  hub.position.copy(hubPos);
+  scene.add(hub);
+  var linkGroup = new THREE.Group();
+  RESORTS.forEach(function(r){
+    var geo = new THREE.BufferGeometry().setFromPoints([hubPos.clone().add(new THREE.Vector3(0,-0.5,0)), new THREE.Vector3(r.x, 4.2, r.z)]);
+    linkGroup.add(new THREE.Line(geo, new THREE.LineBasicMaterial({color:0x1b5fc4, transparent:true, opacity:0.55})));
+  });
+  scene.add(linkGroup);
+
+  // snow
+  var N = 700, pos = new Float32Array(N*3), spd = new Float32Array(N);
+  for (var i = 0; i < N; i++) {
+    pos[i*3]   = (Math.random() - 0.5) * 50;
+    pos[i*3+1] = Math.random() * 22;
+    pos[i*3+2] = (Math.random() - 0.5) * 36;
+    spd[i] = 0.015 + Math.random() * 0.03;
+  }
+  var snowGeo = new THREE.BufferGeometry();
+  snowGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  var snow = new THREE.Points(snowGeo, new THREE.PointsMaterial({color:0xffffff, size:0.16, transparent:true, opacity:0.9}));
+  scene.add(snow);
+
+  // UI
+  var listEl = document.getElementById('list'), info = document.getElementById('info');
+  RESORTS.forEach(function(r, i){
+    var b = document.createElement('button');
+    b.textContent = r.n;
+    b.onclick = function(){ select(i, true); };
+    listEl.appendChild(b);
+  });
+  function setInfo(t, d, isNew) {
+    info.innerHTML = '<b>' + t + (isNew ? '<span class="new">NEW</span>' : '') + '</b>' + d;
+  }
+  function select(i, focus) {
+    selected = i;
+    Array.prototype.forEach.call(listEl.children, function(b, k){ b.classList.toggle('on', k === i); });
+    peaks.forEach(function(p, k){ p.ring.material.opacity = (k === i) ? 0.95 : 0; });
+    var r = RESORTS[i];
+    setInfo(r.n + ' · ' + r.loc, r.d + '<br><br>X6+ 시즌패스는 6곳을 횟수 제한 없이 이용할 수 있습니다(심야 운영 리조트는 심야 포함, 렌탈·강습·락커 등은 별도).', r.isNew);
+    if (focus) controls.target.set(r.x, 1.5, r.z);
+  }
+
+  var rotBtn = document.getElementById('rot'), linkBtn = document.getElementById('links');
+  rotBtn.onclick = function(){
+    controls.autoRotate = !controls.autoRotate;
+    rotBtn.textContent = '자동 회전 ' + (controls.autoRotate ? 'ON' : 'OFF');
+  };
+  linkBtn.onclick = function(){
+    linkGroup.visible = !linkGroup.visible;
+    hub.visible = linkGroup.visible;
+    linkBtn.textContent = '연결선 ' + (linkGroup.visible ? 'ON' : 'OFF');
+  };
+  document.getElementById('reset').onclick = function(){
+    camera.position.copy(HOME);
+    controls.target.copy(TARGET);
+    selected = -1;
+    Array.prototype.forEach.call(listEl.children, function(b){ b.classList.remove('on'); });
+    peaks.forEach(function(p){ p.ring.material.opacity = 0; });
+    setInfo('봉우리를 눌러 보세요', '드래그해 회전하고 휠·핀치로 확대할 수 있습니다.');
+  };
+
+  // picking
+  var ray = new THREE.Raycaster(), mouse = new THREE.Vector2(), down = null;
+  var el = renderer.domElement;
+  el.addEventListener('pointerdown', function(e){
+    down = {x:e.clientX, y:e.clientY};
+    controls.autoRotate = false; rotBtn.textContent = '자동 회전 OFF';
+  });
+  el.addEventListener('pointerup', function(e){
+    if (!down) return;
+    var moved = Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y);
+    down = null;
+    if (moved > 6) return;
+    var r = el.getBoundingClientRect();
+    mouse.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+    mouse.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+    ray.setFromCamera(mouse, camera);
+    var hit = ray.intersectObjects(pickables, false)[0];
+    if (hit) select(hit.object.userData.idx, false);
+  });
+
+  function resize() {
+    var w = view.clientWidth, h = view.clientHeight;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  var t0 = 0;
+  function loop() {
+    requestAnimationFrame(loop);
+    t0 += 0.02;
+    var p = snowGeo.attributes.position.array;
+    for (var i = 0; i < N; i++) {
+      p[i*3+1] -= spd[i];
+      p[i*3] += Math.sin(t0 + i) * 0.003;
+      if (p[i*3+1] < 0) p[i*3+1] = 22;
+    }
+    snowGeo.attributes.position.needsUpdate = true;
+    peaks.forEach(function(pk, k){
+      var s = (k === selected) ? 1 + Math.sin(t0 * 3) * 0.03 : 1;
+      pk.g.scale.set(1, s, 1);
+    });
+    hub.position.y = hubPos.y + Math.sin(t0) * 0.15;
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  loop();
+})();
+</script>
+</body>
+</html>
+
